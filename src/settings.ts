@@ -10,6 +10,11 @@ export const DEFAULT_SPEED = 1.0;
 export const MIN_SPEED = 0.5;
 export const MAX_SPEED = 3.0;
 
+export type PreprocessingModel = {
+  provider: string;
+  id: string;
+};
+
 export type PiSpeakSettings = {
   version: 1;
   backend: { type: "kokoro" };
@@ -20,6 +25,9 @@ export type PiSpeakSettings = {
     id: string;
     path: string;
   };
+  preprocessingEnabled?: boolean;
+  preprocessingModel?: PreprocessingModel;
+  preprocessingPrompt?: string;
 };
 
 type SettingsReadResult = {
@@ -67,6 +75,38 @@ function validateSettings(value: unknown): PiSpeakSettings | undefined {
   if (!model) return undefined;
   if (typeof value.model.path !== "string" || value.model.path.length === 0) return undefined;
 
+  let preprocessingEnabled: boolean | undefined;
+  if ("preprocessingEnabled" in value) {
+    const raw = (value as Record<string, unknown>).preprocessingEnabled;
+    if (raw !== undefined) {
+      if (typeof raw !== "boolean") return undefined;
+      preprocessingEnabled = raw;
+    }
+  }
+
+  let preprocessingModel: PreprocessingModel | undefined;
+  if ("preprocessingModel" in value) {
+    const raw = (value as Record<string, unknown>).preprocessingModel;
+    if (raw !== undefined) {
+      if (!isObject(raw)) return undefined;
+      if (typeof raw.provider !== "string" || typeof raw.id !== "string") return undefined;
+      const provider = raw.provider.trim();
+      const id = raw.id.trim();
+      if (provider.length === 0 || id.length === 0) return undefined;
+      preprocessingModel = { provider, id };
+    }
+  }
+
+  let preprocessingPrompt: string | undefined;
+  if ("preprocessingPrompt" in value) {
+    const raw = (value as Record<string, unknown>).preprocessingPrompt;
+    if (raw !== undefined) {
+      if (typeof raw !== "string") return undefined;
+      const trimmed = raw.trim();
+      if (trimmed.length > 0) preprocessingPrompt = trimmed;
+    }
+  }
+
   return {
     version: SETTINGS_VERSION,
     backend: { type: "kokoro" },
@@ -77,6 +117,9 @@ function validateSettings(value: unknown): PiSpeakSettings | undefined {
       id: value.model.id,
       path: value.model.path,
     },
+    ...(preprocessingEnabled !== undefined ? { preprocessingEnabled } : {}),
+    ...(preprocessingModel ? { preprocessingModel } : {}),
+    ...(preprocessingPrompt ? { preprocessingPrompt } : {}),
   };
 }
 
@@ -112,6 +155,9 @@ export async function writeSettings(settings: PiSpeakSettings): Promise<void> {
 type ModelSettingsOptions = {
   voice?: string;
   speed?: number;
+  preprocessingEnabled?: boolean;
+  preprocessingModel?: PreprocessingModel;
+  preprocessingPrompt?: string;
 };
 
 export function settingsForModel(
@@ -128,17 +174,41 @@ export function settingsForModel(
   // Validate voice belongs to model if possible; fallback to default.
   const resolvedVoice = modelSupportedVoice(model, voice) ? voice : defaultVoiceForModel(model);
 
+  let preprocessingEnabled: boolean | undefined;
+  if (typeof options.preprocessingEnabled === "boolean") {
+    preprocessingEnabled = options.preprocessingEnabled;
+  }
+
+  let preprocessingModel: PreprocessingModel | undefined;
+  if (options.preprocessingModel) {
+    const raw = options.preprocessingModel;
+    if (typeof raw.provider === "string" && typeof raw.id === "string") {
+      const provider = raw.provider.trim();
+      const id = raw.id.trim();
+      if (provider.length > 0 && id.length > 0) {
+        preprocessingModel = { provider, id };
+      }
+    }
+  }
+
+  let preprocessingPrompt: string | undefined;
+  if (typeof options.preprocessingPrompt === "string") {
+    const trimmed = options.preprocessingPrompt.trim();
+    if (trimmed.length > 0) preprocessingPrompt = trimmed;
+  }
+
   return {
     version: SETTINGS_VERSION,
     backend: { type: "kokoro" },
     voice: resolvedVoice,
     speed,
     model: { source: "catalog", id: modelId, path: modelPath },
+    ...(preprocessingEnabled !== undefined ? { preprocessingEnabled } : {}),
+    ...(preprocessingModel ? { preprocessingModel } : {}),
+    ...(preprocessingPrompt ? { preprocessingPrompt } : {}),
   };
 }
 
 function modelSupportedVoice(model: CatalogModel, voice: string): boolean {
   return (model.voices as readonly string[]).includes(voice);
 }
-
-

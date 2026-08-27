@@ -14,6 +14,9 @@ type ModelSelectionOptions = {
   currentModelId?: string;
   voice?: string;
   speed?: number;
+  preprocessingEnabled?: boolean;
+  preprocessingModel?: { provider: string; id: string };
+  preprocessingPrompt?: string;
   continueAfterSelection?: boolean;
 };
 
@@ -120,6 +123,9 @@ export async function runModelSelection(
       const settings = settingsForModel(selected.id, path, {
         voice: configured?.voice ?? options.voice,
         speed: configured?.speed ?? options.speed,
+        preprocessingEnabled: configured?.preprocessingEnabled ?? options.preprocessingEnabled,
+        preprocessingModel: configured?.preprocessingModel ?? options.preprocessingModel,
+        preprocessingPrompt: configured?.preprocessingPrompt ?? options.preprocessingPrompt,
       });
       await writeSettings(settings);
       configured = settings;

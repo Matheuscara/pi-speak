@@ -1,3 +1,12 @@
+export const DEFAULT_PREPROCESSING_PROMPT =
+  "You are preparing text for a text-to-speech system. " +
+  "You will receive a message from a conversation enclosed in quadruple backticks. " +
+  "Summarize it in one single very short sentence, two at most. " +
+  "Use a dry, matter-of-fact tone. " +
+  "Do not use any markdown formatting, just plain text. " +
+  "Prefer words over symbols or abbreviations, as this will be read aloud. " +
+  "Output only the sentence, nothing else.";
+
 export const SPEED_VALUES = [
   "0.5",
   "0.75",

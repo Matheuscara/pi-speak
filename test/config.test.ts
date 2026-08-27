@@ -125,4 +125,139 @@ test("config", async (t) => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  await t.test("preprocessing fields round-trip and preserve on voice change", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-config-pre-"));
+    const original = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const model = CATALOG_MODELS[0]!;
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const created = settingsForModel(model.id, fakePath, {
+        voice: model.voices[0],
+        speed: 1.5,
+        preprocessingEnabled: true,
+        preprocessingModel: { provider: " openai ", id: " gpt-4o " },
+        preprocessingPrompt: "  Custom prompt  ",
+      });
+      assert.equal(created.preprocessingEnabled, true);
+      assert.deepEqual(created.preprocessingModel, { provider: "openai", id: "gpt-4o" });
+      assert.equal(created.preprocessingPrompt, "Custom prompt");
+      await writeSettings(created);
+      const read = await readSettings();
+      assert.ok(read.settings);
+      assert.equal(read.settings!.preprocessingEnabled, true);
+      assert.deepEqual(read.settings!.preprocessingModel, { provider: "openai", id: "gpt-4o" });
+      assert.equal(read.settings!.preprocessingPrompt, "Custom prompt");
+      // preserve via spread (voice change path)
+      const updated = { ...read.settings!, voice: model.voices[1] ?? model.voices[0]! };
+      await writeSettings(updated);
+      const read2 = await readSettings();
+      assert.equal(read2.settings!.preprocessingEnabled, true);
+      assert.deepEqual(read2.settings!.preprocessingModel, { provider: "openai", id: "gpt-4o" });
+      assert.equal(read2.settings!.preprocessingPrompt, "Custom prompt");
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = original;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("readSettings without preprocessing keys remains disabled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-config-pre-absent-"));
+    const original = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const model = CATALOG_MODELS[0]!;
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const base = settingsForModel(model.id, fakePath, { voice: model.voices[0] });
+      await writeSettings(base);
+      const read = await readSettings();
+      assert.ok(read.settings);
+      assert.equal(read.settings!.preprocessingEnabled, undefined);
+      assert.equal(read.settings!.preprocessingModel, undefined);
+      assert.equal(read.settings!.preprocessingPrompt, undefined);
+      assert.equal(read.warning, undefined);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = original;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("readSettings rejects invalid preprocessing shapes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-config-pre-invalid-"));
+    const original = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const model = CATALOG_MODELS[0]!;
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const base = { version: 1, backend: { type: "kokoro" }, voice: "af_heart", speed: 1, model: { source: "catalog", id: model.id, path: fakePath } } as any;
+
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingEnabled: "true" }), "utf8");
+      let r = await readSettings();
+      assert.equal(r.settings, undefined);
+      assert.ok(r.warning);
+
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingModel: { provider: " ", id: "gpt-4" } }), "utf8");
+      r = await readSettings();
+      assert.equal(r.settings, undefined);
+      assert.ok(r.warning);
+
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingModel: { provider: "openai" } }), "utf8");
+      r = await readSettings();
+      assert.equal(r.settings, undefined);
+      assert.ok(r.warning);
+
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingPrompt: 123 }), "utf8");
+      r = await readSettings();
+      assert.equal(r.settings, undefined);
+      assert.ok(r.warning);
+
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingModel: "openai/gpt-4" }), "utf8");
+      r = await readSettings();
+      assert.equal(r.settings, undefined);
+      assert.ok(r.warning);
+
+      // whitespace prompt is valid and treated as absent
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingPrompt: "   " }), "utf8");
+      r = await readSettings();
+      assert.ok(r.settings);
+      assert.equal(r.settings!.preprocessingPrompt, undefined);
+      assert.equal(r.warning, undefined);
+
+      // enabled true without model is valid (hard error at runtime, not validation)
+      await writeFile(join(dir, "pi-speak.json"), JSON.stringify({ ...base, preprocessingEnabled: true }), "utf8");
+      r = await readSettings();
+      assert.ok(r.settings);
+      assert.equal(r.settings!.preprocessingEnabled, true);
+      assert.equal(r.warning, undefined);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = original;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("settingsForModel trims and preserves preprocessing fields", async () => {
+    const model = CATALOG_MODELS[0]!;
+    const fakePath = "/tmp/fake.onnx";
+    const s = settingsForModel(model.id, fakePath, {
+      preprocessingEnabled: true,
+      preprocessingModel: { provider: "  openai  ", id: "  gpt-4o " },
+      preprocessingPrompt: "  Hello  ",
+    });
+    assert.equal(s.preprocessingEnabled, true);
+    assert.deepEqual(s.preprocessingModel, { provider: "openai", id: "gpt-4o" });
+    assert.equal(s.preprocessingPrompt, "Hello");
+
+    const s2 = settingsForModel(model.id, fakePath, { preprocessingModel: { provider: " ", id: " " } });
+    assert.equal(s2.preprocessingModel, undefined);
+
+    const s3 = settingsForModel(model.id, fakePath, { preprocessingPrompt: "   " });
+    assert.equal(s3.preprocessingPrompt, undefined);
+
+    const s4 = settingsForModel(model.id, fakePath, { preprocessingEnabled: false });
+    assert.equal(s4.preprocessingEnabled, false);
+  });
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanTextForSpeech, extractTextContent, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
+import { cleanTextForSpeech, DEFAULT_PREPROCESSING_PROMPT, extractTextContent, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
 
 test("cleanTextForSpeech", async (t) => {
   await t.test("strips fenced code blocks entirely", () => {
@@ -81,4 +81,17 @@ test("SPEED_VALUES and speedToIndex", () => {
   assert.equal(speedToIndex(3.0), 10);
   assert.equal(speedToIndex(99), 0);
   assert.equal(speedToIndex(1.25), 3);
+});
+
+test("DEFAULT_PREPROCESSING_PROMPT", () => {
+  assert.equal(
+    DEFAULT_PREPROCESSING_PROMPT,
+    "You are preparing text for a text-to-speech system. " +
+      "You will receive a message from a conversation enclosed in quadruple backticks. " +
+      "Summarize it in one single very short sentence, two at most. " +
+      "Use a dry, matter-of-fact tone. " +
+      "Do not use any markdown formatting, just plain text. " +
+      "Prefer words over symbols or abbreviations, as this will be read aloud. " +
+      "Output only the sentence, nothing else.",
+  );
 });
