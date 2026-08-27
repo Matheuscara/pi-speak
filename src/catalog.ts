@@ -26,8 +26,7 @@ export type CatalogModel = {
   readonly sha256: string;
 };
 
-export const CATALOG_MODELS: readonly CatalogModel[] =
-  CATALOG_MODELS_GENERATED as unknown as readonly CatalogModel[];
+export const CATALOG_MODELS: readonly CatalogModel[] = CATALOG_MODELS_GENERATED;
 
 const languageNames = new Intl.DisplayNames(["en"], { type: "language" });
 

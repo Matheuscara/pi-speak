@@ -141,9 +141,4 @@ function modelSupportedVoice(model: CatalogModel, voice: string): boolean {
   return (model.voices as readonly string[]).includes(voice);
 }
 
-// Exists check helper used by runtime (mirrors pi-transcribe runtime.ts:128).
-export function isModelPathMissing(settings: PiSpeakSettings): boolean {
-  // Placeholder for existsSync check; runtime will call existsSync directly.
-  void settings;
-  return false;
-}
+
