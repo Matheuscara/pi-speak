@@ -30,7 +30,10 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "npm run check && node scripts/run-tests.mjs"
+    "test": "npm run check && node scripts/run-tests.mjs",
+    "prepublishOnly": "npm test",
+    "catalog:generate": "node scripts/generate-catalog.mjs",
+    "catalog:verify": "node scripts/verify-catalog.mjs"
   },
   "pi": {
     "extensions": [
