@@ -1,0 +1,7 @@
+.repos/
+skills-lock.json
+docs/agents
+.agents/skills
+AGENTS.md
+.scratch
+node_modules
