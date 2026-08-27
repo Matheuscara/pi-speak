@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerSpeakTool } from "./speak-tool.js";
 import type { PiSpeakRuntime } from "./runtime.js";
-import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 
 // Pi awaits extension module evaluation before continuing startup. Keep this
 // entry point registration-only and load feature implementations on first use.
@@ -24,18 +24,31 @@ export default function piSpeak(pi: ExtensionAPI): void {
     return loading;
   }
 
-  // Scaffold: no tool/command registered yet. Future tickets (04/05) will
-  // register `speak` tool, `/speak` command, and `ctrl+alt+x` shortcut via
-  // loadRuntime() closures. Keep this file free of heavy imports.
+  const speakTool = registerSpeakTool(pi, {
+    getSettings: async () => (await loadRuntime()).requireConfiguredSettingsForTool(),
+    getService: async () => (await loadRuntime()).service,
+    getAudioQueue: async () => (await loadRuntime()).audioQueue,
+  });
 
-  // Demonstrate lazy boundary without exposing behavior: first heavy use
-  // would paint synchronously before await. Kept as reference for future
-  // `toggleCapture`/`showSettings` style handlers.
-  void STATUS_WIDGET_KEY;
-  void loadRuntime;
+  pi.registerCommand("speak", {
+    description: "Configure voice and speed for pi-speak",
+    handler: async (_args, ctx) => (await loadRuntime()).showSettings(ctx),
+  });
+
+  if (process.env.PI_SPEAK_DEBUG === "1") {
+    pi.registerCommand("speak-onboarding", {
+      description: "Replay pi-speak onboarding (debug)",
+      handler: async (_args, ctx) => {
+        const { runOnboarding } = await import("./onboarding.js");
+        const configured = await runOnboarding(ctx);
+        if (configured) ctx.ui.notify("Onboarding replay complete", "info");
+      },
+    });
+  }
 
   pi.on("session_shutdown", async (_event, ctx) => {
     shuttingDown = true;
+    await speakTool.shutdown().catch(() => undefined);
     const loading = runtimePromise;
     if (!loading) return;
     const runtime = await loading.catch(() => undefined);
