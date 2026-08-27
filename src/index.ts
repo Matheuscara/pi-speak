@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerSpeakTool } from "./speak-tool.js";
 import type { PiSpeakRuntime } from "./runtime.js";
+import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 
 // Pi awaits extension module evaluation before continuing startup. Keep this
 // entry point registration-only and load feature implementations on first use.
@@ -30,6 +31,21 @@ export default function piSpeak(pi: ExtensionAPI): void {
     getAudioQueue: async () => (await loadRuntime()).audioQueue,
   });
 
+  pi.registerShortcut("ctrl+alt+x" as Parameters<ExtensionAPI["registerShortcut"]>[0], {
+    description: "Speak last agent message",
+    handler: async (ctx) => {
+      if (!runtimePromise && ctx.hasUI) {
+        ctx.ui.setWidget(STATUS_WIDGET_KEY, [ctx.ui.theme.fg("muted", "Synthesizing…")]);
+      }
+      try {
+        await (await loadRuntime()).speakLastMessage(ctx);
+      } catch (error) {
+        if (ctx.hasUI) ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
+        throw error;
+      }
+    },
+  });
+
   pi.registerCommand("speak", {
     description: "Configure voice and speed for pi-speak",
     handler: async (_args, ctx) => (await loadRuntime()).showSettings(ctx),
@@ -38,11 +54,7 @@ export default function piSpeak(pi: ExtensionAPI): void {
   if (process.env.PI_SPEAK_DEBUG === "1") {
     pi.registerCommand("speak-onboarding", {
       description: "Replay pi-speak onboarding (debug)",
-      handler: async (_args, ctx) => {
-        const { runOnboarding } = await import("./onboarding.js");
-        const configured = await runOnboarding(ctx);
-        if (configured) ctx.ui.notify("Onboarding replay complete", "info");
-      },
+      handler: async (_args, ctx) => (await loadRuntime()).replayOnboarding(ctx),
     });
   }
 

@@ -3,11 +3,13 @@ import { Type } from "typebox";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MAX_SPEED, MIN_SPEED, type PiSpeakSettings } from "./settings.js";
+import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 import type { SynthesisService } from "./synthesis-service.js";
 import type { AudioQueue } from "./audio.js";
-import { cleanTextForSpeech } from "./text.js";
+
+const MIN_SPEED = 0.5;
+const MAX_SPEED = 3.0;
 
 type SpeakToolOptions = {
   getSettings: () => Promise<PiSpeakSettings>;
@@ -62,6 +64,7 @@ export function registerSpeakTool(
           operationSignal.throwIfAborted();
           const rawText = params.text?.trim();
           if (!rawText) throw new Error("Missing or empty 'text' field");
+          const { cleanTextForSpeech } = await import("./text.js");
           const cleanedPreview = cleanTextForSpeech(rawText);
           if (!cleanedPreview) throw new Error("Missing or empty 'text' field");
 

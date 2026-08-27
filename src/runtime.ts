@@ -4,16 +4,22 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
+import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createAudioQueue, type AudioQueue } from "./audio.js";
 import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 import { SynthesisService } from "./synthesis-service.js";
+import { cleanTextForSpeech, extractTextContent } from "./text.js";
 
 export type PiSpeakRuntime = {
   readonly service: SynthesisService;
   readonly audioQueue: AudioQueue;
   requireConfiguredSettingsForTool(): Promise<PiSpeakSettings>;
   showSettings(ctx: ExtensionCommandContext): Promise<void>;
+  speakLastMessage(ctx: ExtensionContext): Promise<void>;
+  replayOnboarding(ctx: ExtensionCommandContext): Promise<void>;
   shutdown(ctx: ExtensionContext): Promise<void>;
 };
 
@@ -158,6 +164,101 @@ export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
     if (reload) await ctx.reload();
   }
 
+  async function speakLastMessage(ctx: ExtensionContext): Promise<void> {
+    let configured: PiSpeakSettings;
+    try {
+      configured = await requireConfiguredSettingsForTool();
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      return;
+    }
+
+    const branch = ctx.sessionManager.getBranch();
+    let raw: string | undefined;
+    for (let index = branch.length - 1; index >= 0; index -= 1) {
+      const entry = branch[index] as unknown as {
+        type: string;
+        message?: { role?: string; content?: unknown[] };
+      };
+      if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+      const text = extractTextContent(entry.message.content as unknown[] | undefined);
+      if (text && text.trim()) {
+        raw = text;
+        break;
+      }
+    }
+
+    if (!raw) {
+      ctx.ui.notify("No agent message to speak", "warning");
+      return;
+    }
+
+    const cleaned = cleanTextForSpeech(raw);
+    if (!cleaned) {
+      ctx.ui.notify("Last agent message has no speakable text", "warning");
+      return;
+    }
+
+    const spoken = cleaned.length > 600 ? cleaned.slice(0, 600) : cleaned;
+
+    const hasUI = ctx.hasUI;
+    let visualizer: Awaited<ReturnType<typeof loadVisualizer>> | undefined;
+    try {
+      visualizer = await loadVisualizer().catch(() => undefined);
+    } catch {}
+    if (hasUI) {
+      if (visualizer) {
+        visualizer.showSynthesisStatus(ctx, "Synthesizing…");
+      } else {
+        ctx.ui.setWidget(STATUS_WIDGET_KEY, [ctx.ui.theme.fg("muted", "Synthesizing…")]);
+      }
+    }
+
+    let wavBuffer: Buffer;
+    try {
+      wavBuffer = await synthesisService.synthesize(configured, spoken, undefined);
+    } catch (error) {
+      ctx.ui.notify(
+        `Synthesis failed: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
+      return;
+    } finally {
+      if (visualizer) {
+        visualizer.clearSynthesisWidget(ctx);
+      } else if (hasUI) {
+        ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
+      }
+    }
+
+    const directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
+    const outPath = join(directory, `speak-last-${process.pid}-${Date.now()}.wav`);
+    await writeFile(outPath, wavBuffer);
+    const audio = await loadAudio();
+    audioQueue.enqueue({
+      play: async () => {
+        try {
+          await audio.playWav(outPath);
+        } finally {
+          await unlink(outPath).catch(() => undefined);
+          await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+        }
+      },
+    });
+    ctx.ui.notify(`Speaking last message (${spoken.length} chars)`, "info");
+  }
+
+  async function replayOnboarding(ctx: ExtensionCommandContext): Promise<void> {
+    await runExclusive(ctx, async () => {
+      await loadSettingsOnce();
+      const { runOnboarding } = await import("./onboarding.js");
+      const configured = await runOnboarding(ctx);
+      if (!configured) return;
+      rememberSettings(configured);
+      ctx.ui.notify("Onboarding replay complete", "info");
+    });
+  }
+
   async function shutdown(ctx: ExtensionContext): Promise<void> {
     if (shutDown) return;
     shutDown = true;
@@ -178,6 +279,8 @@ export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
     audioQueue,
     requireConfiguredSettingsForTool,
     showSettings,
+    speakLastMessage,
+    replayOnboarding,
     shutdown,
   };
 }
