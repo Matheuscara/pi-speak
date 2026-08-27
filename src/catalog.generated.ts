@@ -89,7 +89,7 @@ export const CATALOG_MODELS_GENERATED = [
     "recommended": true,
     "recommendedRank": 1,
     "quant": "q4",
-    "filename": "model_q4.onnx",
+    "filename": "onnx/model_q4.onnx",
     "size": 305215966,
     "sha256": "04cf570cf9c4153694f76347ed4b9a48c1b59ff1de0999e6605d123966b197c7"
   }
