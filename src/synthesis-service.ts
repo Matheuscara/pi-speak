@@ -1,6 +1,6 @@
 import { cleanTextForSpeech } from "./text.js";
 import type { PiSpeakSettings } from "./settings.js";
-import { KokoroBackend, type SynthesisOptions } from "./synthesis.js";
+import { KokoroBackend } from "./synthesis.js";
 
 type SynthesisJob = {
   settings: PiSpeakSettings;
@@ -13,35 +13,12 @@ type SynthesisJob = {
   removeAbortListener?: () => void;
 };
 
-type ReusableBackend = Pick<KokoroBackend, "prepare" | "synthesize" | "dispose"> & {
-  synthesizeWithRate?: (
-    text: string,
-    opts: SynthesisOptions,
-  ) => Promise<{ audio: Float32Array; sampling_rate: number }>;
-};
+type ReusableBackend = Pick<KokoroBackend, "prepare" | "synthesize" | "dispose">;
 
 type BackendFactory = (modelPath: string) => ReusableBackend | Promise<ReusableBackend>;
 
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error("Synthesis cancelled");
-}
-
-function withShutdownSignal(shutdownSignal: AbortSignal, signal?: AbortSignal): AbortSignal {
-  if (!signal) return shutdownSignal;
-  // AbortSignal.any is available in Node 20+; fallback to manual composition if missing.
-  const anyFn = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
-  if (typeof anyFn === "function") return anyFn([signal, shutdownSignal]);
-  // Fallback: create a controller that aborts when either aborts.
-  const controller = new AbortController();
-  const onAbort = (): void => {
-    controller.abort(signal.aborted ? signal.reason : shutdownSignal.reason);
-  };
-  if (signal.aborted || shutdownSignal.aborted) onAbort();
-  else {
-    signal.addEventListener("abort", onAbort, { once: true });
-    shutdownSignal.addEventListener("abort", onAbort, { once: true });
-  }
-  return controller.signal;
 }
 
 export function float32ToWav(samples: Float32Array, sampleRate: number): Buffer {
@@ -136,7 +113,9 @@ export class SynthesisService {
   }
 
   private withShutdown(signal?: AbortSignal): AbortSignal {
-    return withShutdownSignal(this.shutdownController.signal, signal);
+    return signal
+      ? AbortSignal.any([signal, this.shutdownController.signal])
+      : this.shutdownController.signal;
   }
 
   private schedule(): void {

@@ -70,21 +70,6 @@ export class KokoroBackend {
     return result.audio as Float32Array;
   }
 
-  /** Expose raw result with sampling_rate for WAV encoding if needed. */
-  async synthesizeWithRate(text: string, options: SynthesisOptions): Promise<SynthesisResult> {
-    options.signal?.throwIfAborted();
-    await this.prepare();
-    const tts = this.tts;
-    if (!tts) throw new Error("Synthesis backend is not prepared");
-    options.signal?.throwIfAborted();
-    const result = await tts.generate(text, {
-      voice: options.voice,
-      speed: options.speed,
-    });
-    options.signal?.throwIfAborted();
-    return result as SynthesisResult;
-  }
-
   async dispose(): Promise<void> {
     this.disposed = true;
     await this.loading?.catch(() => undefined);
