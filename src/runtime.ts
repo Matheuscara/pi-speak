@@ -11,7 +11,7 @@ import { createAudioQueue, type AudioQueue } from "./audio.js";
 import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 import { SynthesisService } from "./synthesis-service.js";
-import { cleanTextForSpeech, extractTextContent } from "./text.js";
+import { DEFAULT_PREPROCESSING_PROMPT, extractTextContent } from "./text.js";
 
 export type PiSpeakRuntime = {
   readonly service: SynthesisService;
@@ -23,7 +23,20 @@ export type PiSpeakRuntime = {
   shutdown(ctx: ExtensionContext): Promise<void>;
 };
 
-export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
+export type PiSpeakRuntimeOptions = {
+  synthesisService?: SynthesisService;
+  generatePreprocessedText?: (
+    raw: string,
+    prompt: string,
+    model: unknown,
+    ctx: ExtensionContext,
+  ) => Promise<string | null>;
+};
+
+export function createPiSpeakRuntime(
+  pi: ExtensionAPI,
+  options: PiSpeakRuntimeOptions = {},
+): PiSpeakRuntime {
   let operation: Promise<void> | undefined;
   let shutDown = false;
   let settings: PiSpeakSettings | undefined;
@@ -34,7 +47,7 @@ export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
   let audioModulePromise: Promise<typeof import("./audio.js")> | undefined;
   let visualizerModulePromise: Promise<typeof import("./visualizer.js")> | undefined;
 
-  const synthesisService = new SynthesisService();
+  const synthesisService = options.synthesisService ?? new SynthesisService();
   const audioQueue = createAudioQueue();
 
   function loadAudio(): Promise<typeof import("./audio.js")> {
@@ -82,6 +95,9 @@ export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
       currentModelId: previous.model.id,
       voice: previous.voice,
       speed: previous.speed,
+      preprocessingEnabled: previous.preprocessingEnabled,
+      preprocessingModel: previous.preprocessingModel,
+      preprocessingPrompt: previous.preprocessingPrompt,
       continueAfterSelection: true,
     });
     if (configured) rememberSettings(configured);
@@ -165,87 +181,129 @@ export function createPiSpeakRuntime(pi: ExtensionAPI): PiSpeakRuntime {
   }
 
   async function speakLastMessage(ctx: ExtensionContext): Promise<void> {
-    let configured: PiSpeakSettings;
-    try {
-      configured = await requireConfiguredSettingsForTool();
-    } catch (error) {
-      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
-      return;
-    }
-
-    const branch = ctx.sessionManager.getBranch();
-    let raw: string | undefined;
-    for (let index = branch.length - 1; index >= 0; index -= 1) {
-      const entry = branch[index] as unknown as {
-        type: string;
-        message?: { role?: string; content?: unknown[] };
-      };
-      if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
-      const text = extractTextContent(entry.message.content as unknown[] | undefined);
-      if (text && text.trim()) {
-        raw = text;
-        break;
+    return runExclusive(ctx, async () => {
+      let configured: PiSpeakSettings;
+      try {
+        configured = await requireConfiguredSettingsForTool();
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        return;
       }
-    }
 
-    if (!raw) {
-      ctx.ui.notify("No agent message to speak", "warning");
-      return;
-    }
-
-    const cleaned = cleanTextForSpeech(raw);
-    if (!cleaned) {
-      ctx.ui.notify("Last agent message has no speakable text", "warning");
-      return;
-    }
-
-    const spoken = cleaned.length > 600 ? cleaned.slice(0, 600) : cleaned;
-
-    const hasUI = ctx.hasUI;
-    let visualizer: Awaited<ReturnType<typeof loadVisualizer>> | undefined;
-    try {
-      visualizer = await loadVisualizer().catch(() => undefined);
-    } catch {}
-    if (hasUI) {
-      if (visualizer) {
-        visualizer.showSynthesisStatus(ctx, "Synthesizing…");
-      } else {
-        ctx.ui.setWidget(STATUS_WIDGET_KEY, [ctx.ui.theme.fg("muted", "Synthesizing…")]);
-      }
-    }
-
-    let wavBuffer: Buffer;
-    try {
-      wavBuffer = await synthesisService.synthesize(configured, spoken, undefined);
-    } catch (error) {
-      ctx.ui.notify(
-        `Synthesis failed: ${error instanceof Error ? error.message : String(error)}`,
-        "error",
-      );
-      return;
-    } finally {
-      if (visualizer) {
-        visualizer.clearSynthesisWidget(ctx);
-      } else if (hasUI) {
-        ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
-      }
-    }
-
-    const directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
-    const outPath = join(directory, `speak-last-${process.pid}-${Date.now()}.wav`);
-    await writeFile(outPath, wavBuffer);
-    const audio = await loadAudio();
-    audioQueue.enqueue({
-      play: async () => {
-        try {
-          await audio.playWav(outPath);
-        } finally {
-          await unlink(outPath).catch(() => undefined);
-          await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      const branch = ctx.sessionManager.getBranch();
+      let raw: string | undefined;
+      for (let index = branch.length - 1; index >= 0; index -= 1) {
+        const entry = branch[index] as unknown as {
+          type: string;
+          message?: { role?: string; content?: unknown[] };
+        };
+        if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+        const text = extractTextContent(entry.message.content as unknown[] | undefined);
+        if (text && text.trim()) {
+          raw = text;
+          break;
         }
-      },
+      }
+
+      if (!raw) {
+        ctx.ui.notify("No agent message to speak", "warning");
+        return;
+      }
+
+      const hasUI = ctx.hasUI;
+      let visualizer: Awaited<ReturnType<typeof loadVisualizer>> | undefined;
+      try {
+        visualizer = await loadVisualizer().catch(() => undefined);
+      } catch {}
+      if (hasUI) {
+        if (visualizer) {
+          visualizer.showSynthesisStatus(ctx, "Synthesizing…");
+        } else {
+          ctx.ui.setWidget(STATUS_WIDGET_KEY, [ctx.ui.theme.fg("muted", "Synthesizing…")]);
+        }
+      }
+
+      let textToSpeak: string;
+      try {
+        if (configured.preprocessingEnabled) {
+          const modelConfig = configured.preprocessingModel;
+          if (!modelConfig) {
+            ctx.ui.notify(
+              "Preprocessing is enabled but no model is configured. Use /speak to select a model or disable preprocessing.",
+              "error",
+            );
+            return;
+          }
+
+          const model = ctx.modelRegistry.find(modelConfig.provider, modelConfig.id);
+          if (!model) {
+            ctx.ui.notify(`Preprocessing model not found: ${modelConfig.provider}/${modelConfig.id}`, "error");
+            return;
+          }
+
+          const prompt =
+            configured.preprocessingPrompt && configured.preprocessingPrompt.trim().length > 0
+              ? configured.preprocessingPrompt.trim()
+              : DEFAULT_PREPROCESSING_PROMPT;
+
+          let result: string | null;
+          try {
+            const generate = options.generatePreprocessedText
+              ? options.generatePreprocessedText
+              : (await import("./preprocessing.js")).generatePreprocessedText;
+            result = await generate(raw, prompt, model, ctx);
+          } catch (error) {
+            ctx.ui.notify(
+              `Preprocessing failed: ${error instanceof Error ? error.message : String(error)}`,
+              "error",
+            );
+            return;
+          }
+
+          if (!result || !result.trim()) {
+            ctx.ui.notify("Preprocessing failed: LLM returned empty response", "error");
+            return;
+          }
+
+          textToSpeak = result.trim();
+        } else {
+          textToSpeak = raw;
+        }
+
+        let wavBuffer: Buffer;
+        try {
+          wavBuffer = await synthesisService.synthesize(configured, textToSpeak, undefined);
+        } catch (error) {
+          ctx.ui.notify(
+            `Synthesis failed: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
+          return;
+        }
+
+        const directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
+        const outPath = join(directory, `speak-last-${process.pid}-${Date.now()}.wav`);
+        await writeFile(outPath, wavBuffer);
+        const audio = await loadAudio();
+        audioQueue.enqueue({
+          play: async () => {
+            try {
+              await audio.playWav(outPath);
+            } finally {
+              await unlink(outPath).catch(() => undefined);
+              await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+            }
+          },
+        });
+        ctx.ui.notify(`Speaking last message (${textToSpeak.length} chars)`, "info");
+      } finally {
+        if (visualizer) {
+          visualizer.clearSynthesisWidget(ctx);
+        } else if (hasUI) {
+          ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
+        }
+      }
     });
-    ctx.ui.notify(`Speaking last message (${spoken.length} chars)`, "info");
   }
 
   async function replayOnboarding(ctx: ExtensionCommandContext): Promise<void> {

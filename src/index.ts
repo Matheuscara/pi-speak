@@ -34,9 +34,6 @@ export default function piSpeak(pi: ExtensionAPI): void {
   pi.registerShortcut("ctrl+alt+x" as Parameters<ExtensionAPI["registerShortcut"]>[0], {
     description: "Speak last agent message",
     handler: async (ctx) => {
-      if (!runtimePromise && ctx.hasUI) {
-        ctx.ui.setWidget(STATUS_WIDGET_KEY, [ctx.ui.theme.fg("muted", "Synthesizing…")]);
-      }
       try {
         await (await loadRuntime()).speakLastMessage(ctx);
       } catch (error) {
