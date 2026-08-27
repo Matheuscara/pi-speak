@@ -32,6 +32,9 @@ try {
     join(outputDirectory, "test", "config.test.js"),
     join(outputDirectory, "test", "audio.test.js"),
     join(outputDirectory, "test", "text.test.js"),
+    join(outputDirectory, "test", "runtime-preprocessing.test.js"),
+    join(outputDirectory, "test", "preprocessing.test.js"),
+    join(outputDirectory, "test", "settings-menu-preprocessing.test.js"),
   ]);
 } finally {
   await rm(outputDirectory, { recursive: true, force: true });
