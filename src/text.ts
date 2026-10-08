@@ -1,3 +1,4 @@
+import { franc } from "franc-min";
 export const DEFAULT_PREPROCESSING_PROMPT =
   "You are preparing text for a text-to-speech system. " +
   "You will receive a message from a conversation enclosed in quadruple backticks. " +
@@ -5,6 +6,7 @@ export const DEFAULT_PREPROCESSING_PROMPT =
   "Use a dry, matter-of-fact tone. " +
   "Do not use any markdown formatting, just plain text. " +
   "Prefer words over symbols or abbreviations, as this will be read aloud. " +
+  "Keep the same language as the original message. " +
   "Output only the sentence, nothing else.";
 
 export const SPEED_VALUES = [
@@ -109,4 +111,22 @@ export function splitTextForSpeech(text: string, maxChars = 240): string[] {
     start = end;
   }
   return chunks;
+}
+
+
+/** Auto-switch between an English and Brazilian Portuguese voice when the text is long enough to classify. */
+export function selectSpeechVoice(
+  text: string,
+  primaryVoice: string,
+  alternateVoice?: string,
+): string {
+  if (!alternateVoice) return primaryVoice;
+  const primaryLanguage = primaryVoice.startsWith("p") ? "por" : /^(?:a|b)/.test(primaryVoice) ? "eng" : undefined;
+  const alternateLanguage = alternateVoice.startsWith("p") ? "por" : /^(?:a|b)/.test(alternateVoice) ? "eng" : undefined;
+  if (!primaryLanguage || !alternateLanguage || primaryLanguage === alternateLanguage) return primaryVoice;
+
+  const sample = cleanTextForSpeech(text).slice(0, 1200);
+  const detectedLanguage = franc(sample, { minLength: 32 });
+  if (detectedLanguage === alternateLanguage) return alternateVoice;
+  return primaryVoice;
 }

@@ -37,7 +37,7 @@ The extension registers:
 - `Ctrl+Alt+X` to speak the last agent message using the primary voice;
 - `Ctrl+Alt+Y` to speak it using the separately configured alternate voice.
 
-The Kokoro backend phonemizes Brazilian Portuguese locally with ephone when the selected voice is `pf_dora`, `pm_alex`, or `pm_santa`; English voices keep the existing Kokoro phonemizer. Select `Ctrl+Alt+Y` manually for Portuguese—the current version does not detect the response language automatically.
+When the alternate voice is Brazilian Portuguese and the primary is English, `Ctrl+Alt+X` and the `speak` tool select a voice automatically for confidently detected English or Portuguese text. Short or ambiguous text falls back to the primary voice. `Ctrl+Alt+Y` always forces the alternate voice.
 
 Long replies are synthesized in short, ordered chunks. Playback starts after the first chunk instead of waiting for the entire reply to finish.
 

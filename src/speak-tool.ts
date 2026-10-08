@@ -61,12 +61,12 @@ export function registerSpeakTool(
           operationSignal.throwIfAborted();
           const rawText = params.text?.trim();
           if (!rawText) throw new Error("Missing or empty 'text' field");
-          const { cleanTextForSpeech } = await import("./text.js");
+          const { cleanTextForSpeech, selectSpeechVoice } = await import("./text.js");
           const cleanedPreview = cleanTextForSpeech(rawText);
           if (!cleanedPreview) throw new Error("Missing or empty 'text' field");
 
           const configured = await options.getSettings();
-          const voice = params.voice ?? configured.voice;
+          const voice = params.voice ?? selectSpeechVoice(cleanedPreview, configured.voice, configured.alternateVoice);
           const speed = params.speed ?? configured.speed;
 
           if (speed < MIN_SPEED || speed > MAX_SPEED) {

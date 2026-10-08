@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanTextForSpeech, DEFAULT_PREPROCESSING_PROMPT, extractTextContent, splitTextForSpeech, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
+import { cleanTextForSpeech, DEFAULT_PREPROCESSING_PROMPT, extractTextContent, selectSpeechVoice, splitTextForSpeech, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
 
 test("cleanTextForSpeech", async (t) => {
   await t.test("strips fenced code blocks entirely", () => {
@@ -84,6 +84,19 @@ test("voiceHint", () => {
   assert.equal(voiceHint("xx_unknown"), "");
 });
 
+test("selectSpeechVoice switches confidently between English and Brazilian Portuguese", () => {
+  const english =
+    "This explanation describes how developers receive temporary credentials for a read-only database account.";
+  const portuguese =
+    "O objetivo é dar a cada desenvolvedor uma credencial pessoal, temporária e somente leitura para o banco de dados.";
+
+  assert.equal(selectSpeechVoice(english, "af_heart", "pf_dora"), "af_heart");
+  assert.equal(selectSpeechVoice(portuguese, "af_heart", "pf_dora"), "pf_dora");
+  assert.equal(selectSpeechVoice(english, "pf_dora", "af_heart"), "af_heart");
+  assert.equal(selectSpeechVoice("Yes.", "af_heart", "pf_dora"), "af_heart");
+  assert.equal(selectSpeechVoice(portuguese, "af_heart"), "af_heart");
+});
+
 test("SPEED_VALUES and speedToIndex", () => {
   assert.deepEqual([...SPEED_VALUES], ["0.5", "0.75", "1.0", "1.25", "1.5", "1.75", "2.0", "2.25", "2.5", "2.75", "3.0"]);
   assert.equal(speedToIndex(1.0), 2);
@@ -102,6 +115,7 @@ test("DEFAULT_PREPROCESSING_PROMPT", () => {
       "Use a dry, matter-of-fact tone. " +
       "Do not use any markdown formatting, just plain text. " +
       "Prefer words over symbols or abbreviations, as this will be read aloud. " +
+      "Keep the same language as the original message. " +
       "Output only the sentence, nothing else.",
   );
 });

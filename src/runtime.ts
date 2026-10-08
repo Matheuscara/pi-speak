@@ -8,7 +8,7 @@ import { createAudioQueue, type AudioQueue } from "./audio.js";
 import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 import { SynthesisService } from "./synthesis-service.js";
-import { DEFAULT_PREPROCESSING_PROMPT, extractTextContent } from "./text.js";
+import { DEFAULT_PREPROCESSING_PROMPT, extractTextContent, selectSpeechVoice } from "./text.js";
 
 export type PiSpeakRuntime = {
   readonly service: SynthesisService;
@@ -188,12 +188,10 @@ export function createPiSpeakRuntime(
         return;
       }
 
-      const voice = alternateVoice ? configured.alternateVoice : configured.voice;
-      if (!voice) {
+      if (alternateVoice && !configured.alternateVoice) {
         ctx.ui.notify("No alternate voice configured. Choose Alternate voice in /speak.", "warning");
         return;
       }
-      const voiceSettings = voice === configured.voice ? configured : { ...configured, voice };
 
       const branch = ctx.sessionManager.getBranch();
       let raw: string | undefined;
@@ -274,6 +272,10 @@ export function createPiSpeakRuntime(
         } else {
           textToSpeak = raw;
         }
+        const voice = alternateVoice
+          ? configured.alternateVoice!
+          : selectSpeechVoice(textToSpeak, configured.voice, configured.alternateVoice);
+        const voiceSettings = voice === configured.voice ? configured : { ...configured, voice };
 
         const audio = await loadAudio();
         let started = false;
