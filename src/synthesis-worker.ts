@@ -1,4 +1,5 @@
 import { env } from "@huggingface/transformers";
+import type { ephoneModule } from "ephone";
 import { KokoroTTS } from "kokoro-js";
 
 const send = process.send?.bind(process);
@@ -11,6 +12,7 @@ type Request =
 type KokoroVoice = keyof KokoroTTS["voices"];
 
 let tts: KokoroTTS | undefined;
+let portuguesePhonemizer: ephoneModule | undefined;
 
 process.on("message", async (request: Request) => {
   try {
@@ -23,8 +25,26 @@ process.on("message", async (request: Request) => {
       return;
     }
     if (!tts) throw new Error("Speech model is not prepared");
-    const result = await tts.generate(request.text, { voice: request.voice as KokoroVoice, speed: request.speed });
-    const samples = result.audio as Float32Array;
+    let samples: Float32Array;
+    if (request.voice.startsWith("p")) {
+      // Load the PT-BR WASM phonemizer only when a Brazilian voice is requested.
+      const { default: createEphone, roa } = await import("ephone");
+      portuguesePhonemizer ??= await createEphone(roa);
+      portuguesePhonemizer.setVoice("pt-BR");
+      const phonemes = portuguesePhonemizer.textToIpa(request.text).replace(/\.$/, "");
+      const { input_ids: inputIds } = await tts.tokenizer(phonemes, { truncation: true });
+      const audio = await tts.generate_from_ids(inputIds, {
+        voice: request.voice as KokoroVoice,
+        speed: request.speed,
+      });
+      samples = audio.audio as Float32Array;
+    } else {
+      const audio = await tts.generate(request.text, {
+        voice: request.voice as KokoroVoice,
+        speed: request.speed,
+      });
+      samples = audio.audio as Float32Array;
+    }
     const bytes = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
     send({ id: request.id, type: "audio", audio: bytes.toString("base64") });
   } catch (error) {

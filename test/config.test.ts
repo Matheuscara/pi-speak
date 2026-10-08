@@ -102,9 +102,15 @@ test("config", async (t) => {
 
     const alternate = settingsForModel(model.id, fakePath, {
       voice: "af_heart",
-      alternateVoice: "pf_dora",
+      alternateVoice: "jf_alpha",
     });
     assert.equal(alternate.alternateVoice, undefined, "do not persist voices the runtime cannot synthesize");
+
+    const portuguese = settingsForModel(model.id, fakePath, {
+      voice: "af_heart",
+      alternateVoice: "pf_dora",
+    });
+    assert.equal(portuguese.alternateVoice, "pf_dora", "PT-BR Kokoro voice is supported");
     const s3 = settingsForModel(model.id, fakePath, { voice: model.voices[0], speed: 99 as any });
     assert.equal(s3.speed, 1.0);
 
