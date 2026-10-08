@@ -1,17 +1,22 @@
-import { cleanTextForSpeech } from "./text.js";
+import { cleanTextForSpeech, splitTextForSpeech } from "./text.js";
 import type { PiSpeakSettings } from "./settings.js";
 import { KokoroBackend } from "./synthesis.js";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
-type SynthesisJob = {
+type JobBase = {
   settings: PiSpeakSettings;
   text: string;
   signal?: AbortSignal;
-  resolve: (value: Buffer) => void;
   reject: (error: unknown) => void;
   started: boolean;
   settled: boolean;
   removeAbortListener?: () => void;
 };
+
+type SynthesisJob = JobBase & (
+  | { mode: "buffer"; resolve: (value: Buffer) => void }
+  | { mode: "chunks"; onChunk: (wav: Buffer) => void; resolve: () => void }
+);
 
 type ReusableBackend = Pick<KokoroBackend, "prepare" | "synthesize" | "dispose">;
 
@@ -65,9 +70,7 @@ export class SynthesisService {
   private readonly shutdownController = new AbortController();
 
   constructor(
-    private readonly createBackend: BackendFactory = async (modelPath) => {
-      return new KokoroBackend(modelPath);
-    },
+    private readonly createBackend: BackendFactory = () => new KokoroBackend(),
   ) {}
 
   synthesize(
@@ -77,32 +80,39 @@ export class SynthesisService {
   ): Promise<Buffer> {
     if (this.shuttingDown) return Promise.reject(new Error("pi-speak is shutting down"));
     if (signal?.aborted) return Promise.reject(abortError(signal));
-
-    const result = new Promise<Buffer>((resolve, reject) => {
-      const job: SynthesisJob = {
-        settings,
-        text,
-        signal,
-        resolve,
-        reject,
-        started: false,
-        settled: false,
-      };
-      if (signal) {
-        const onAbort = (): void => {
-          if (job.started || job.settled) return;
-          const index = this.queue.indexOf(job);
-          if (index >= 0) this.queue.splice(index, 1);
-          this.settleJob(job, () => reject(abortError(signal)));
-          this.schedule();
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-        job.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
-      }
-      this.queue.push(job);
+    return new Promise<Buffer>((resolve, reject) => {
+      this.enqueue({ mode: "buffer", settings, text, signal, resolve, reject, started: false, settled: false });
     });
+  }
+
+  synthesizeChunks(
+    settings: PiSpeakSettings,
+    text: string,
+    onChunk: (wav: Buffer) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (this.shuttingDown) return Promise.reject(new Error("pi-speak is shutting down"));
+    if (signal?.aborted) return Promise.reject(abortError(signal));
+    return new Promise<void>((resolve, reject) => {
+      this.enqueue({ mode: "chunks", settings, text, signal, onChunk, resolve, reject, started: false, settled: false });
+    });
+  }
+
+  private enqueue(job: SynthesisJob): void {
+    const signal = job.signal;
+    if (signal) {
+      const onAbort = (): void => {
+        if (job.started || job.settled) return;
+        const index = this.queue.indexOf(job);
+        if (index >= 0) this.queue.splice(index, 1);
+        this.settleJob(job, () => job.reject(abortError(signal)));
+        this.schedule();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      job.removeAbortListener = () => signal.removeEventListener("abort", onAbort);
+    }
+    this.queue.push(job);
     this.schedule();
-    return result;
   }
 
   private settleJob(job: SynthesisJob, settle: () => void): void {
@@ -155,14 +165,29 @@ export class SynthesisService {
       const cleaned = cleanTextForSpeech(job.text);
       if (!cleaned) throw new Error("Missing or empty 'text' field");
       signal.throwIfAborted();
-      const samples = await backend.synthesize(cleaned, {
-        voice: job.settings.voice,
-        speed: job.settings.speed,
-        signal,
-      });
-      signal.throwIfAborted();
-      const wav = float32ToWav(samples, 24000);
-      this.settleJob(job, () => job.resolve(wav));
+      if (job.mode === "chunks") {
+        for (const chunk of splitTextForSpeech(cleaned)) {
+          signal.throwIfAborted();
+          const samples = await backend.synthesize(chunk, {
+            voice: job.settings.voice,
+            speed: job.settings.speed,
+            signal,
+          });
+          signal.throwIfAborted();
+          job.onChunk(float32ToWav(samples, 24000));
+          await yieldToEventLoop();
+        }
+        this.settleJob(job, () => job.resolve());
+      } else {
+        const samples = await backend.synthesize(cleaned, {
+          voice: job.settings.voice,
+          speed: job.settings.speed,
+          signal,
+        });
+        signal.throwIfAborted();
+        const wav = float32ToWav(samples, 24000);
+        this.settleJob(job, () => job.resolve(wav));
+      }
     } catch (error) {
       this.settleJob(job, () => job.reject(error));
     }

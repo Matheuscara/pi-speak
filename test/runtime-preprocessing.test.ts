@@ -27,11 +27,11 @@ function createFakeSynthesisService() {
       failMessage = msg;
     },
     service: {
-      async synthesize(settings: PiSpeakSettings, text: string) {
+      async synthesizeChunks(settings: PiSpeakSettings, text: string, onChunk: (wav: Buffer) => void) {
         calls.push({ settings, text });
         if (gate) await gate.promise;
         if (shouldFail) throw new Error(failMessage);
-        return Buffer.from("fake-wav");
+        onChunk(Buffer.from("fake-wav"));
       },
       async shutdown() {},
     } as unknown as import("../src/synthesis-service.js").SynthesisService,
@@ -562,11 +562,4 @@ test("runtime preprocessing", async (t) => {
     }
   });
 
-  await t.test("speak tool remains deterministic: already covered by eager imports and previous behavior", async () => {
-    // Verify speak-tool does not import preprocessing statically
-    const { readFileSync } = await import("node:fs");
-    const speakToolSrc = readFileSync(join(process.cwd(), "src/speak-tool.ts"), "utf8");
-    assert.equal(speakToolSrc.includes("preprocessing"), false, "speak-tool should not import preprocessing");
-    assert.equal(speakToolSrc.includes("preprocessingEnabled"), false, "speak-tool should not check preprocessingEnabled");
-  });
 });

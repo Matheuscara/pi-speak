@@ -1,8 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
 import type { SynthesisService } from "./synthesis-service.js";
@@ -85,36 +82,22 @@ export function registerSpeakTool(
             ]);
           }
 
-          let wavBuffer: Buffer;
           try {
             const service = await options.getService();
-            wavBuffer = await service.synthesize(effectiveSettings, cleanedPreview, operationSignal);
-            operationSignal.throwIfAborted();
-          } finally {
-            if (hasUI) ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
-          }
-
-          const directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
-          const outPath = join(directory, `speak-${process.pid}-${Date.now()}.wav`);
-          await writeFile(outPath, wavBuffer);
-
-          const audioQueue = await options.getAudioQueue();
-          const { playWav } = await import("./audio.js");
-          audioQueue.enqueue({
-            play: async () => {
-              try {
-                await playWav(outPath);
-              } catch (error) {
+            const audioQueue = await options.getAudioQueue();
+            const { enqueueWav } = await import("./audio.js");
+            await service.synthesizeChunks(effectiveSettings, cleanedPreview, (wav) => {
+              enqueueWav(audioQueue, wav, (error) => {
                 ctx.ui.notify(
                   `Audio playback failed: ${error instanceof Error ? error.message : String(error)}`,
                   "error",
                 );
-              } finally {
-                await unlink(outPath).catch(() => undefined);
-                await rm(directory, { recursive: true, force: true }).catch(() => undefined);
-              }
-            },
-          });
+              });
+            }, operationSignal);
+            operationSignal.throwIfAborted();
+          } finally {
+            if (hasUI) ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
+          }
 
           const preview = rawText.length > 80 ? `${rawText.slice(0, 80)}…` : rawText;
           return {

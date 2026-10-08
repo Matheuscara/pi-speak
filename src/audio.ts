@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -106,4 +108,27 @@ export function createAudioQueue(): AudioQueue {
       return playing;
     },
   };
+}
+
+/** Queue a WAV only after it is synthesized; create its file when playback starts. */
+export function enqueueWav(
+  queue: AudioQueue,
+  wav: Buffer,
+  onError: (error: unknown) => void,
+): void {
+  queue.enqueue({
+    async play() {
+      let directory: string | undefined;
+      try {
+        directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
+        const outPath = join(directory, "speech.wav");
+        await writeFile(outPath, wav);
+        await playWav(outPath);
+      } catch (error) {
+        onError(error);
+      } finally {
+        if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      }
+    },
+  });
 }

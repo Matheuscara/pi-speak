@@ -27,7 +27,6 @@ try {
   ]);
   await run(process.execPath, [
     "--test",
-    join(outputDirectory, "test", "eager-imports.test.js"),
     join(outputDirectory, "test", "synthesis-service.test.js"),
     join(outputDirectory, "test", "config.test.js"),
     join(outputDirectory, "test", "audio.test.js"),

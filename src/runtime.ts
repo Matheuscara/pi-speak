@@ -4,9 +4,6 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { createAudioQueue, type AudioQueue } from "./audio.js";
 import type { PiSpeakSettings } from "./settings.js";
 import { STATUS_WIDGET_KEY } from "./shortcut-core.js";
@@ -270,9 +267,21 @@ export function createPiSpeakRuntime(
           textToSpeak = raw;
         }
 
-        let wavBuffer: Buffer;
+        const audio = await loadAudio();
+        let started = false;
         try {
-          wavBuffer = await synthesisService.synthesize(configured, textToSpeak, undefined);
+          await synthesisService.synthesizeChunks(configured, textToSpeak, (wav) => {
+            audio.enqueueWav(audioQueue, wav, (error) => {
+              ctx.ui.notify(
+                `Audio playback failed: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
+            });
+            if (!started) {
+              started = true;
+              ctx.ui.notify(`Speaking last message (${textToSpeak.length} chars)`, "info");
+            }
+          });
         } catch (error) {
           ctx.ui.notify(
             `Synthesis failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -280,27 +289,6 @@ export function createPiSpeakRuntime(
           );
           return;
         }
-
-        const directory = await mkdtemp(join(tmpdir(), "pi-speak-"));
-        const outPath = join(directory, `speak-last-${process.pid}-${Date.now()}.wav`);
-        await writeFile(outPath, wavBuffer);
-        const audio = await loadAudio();
-        audioQueue.enqueue({
-          play: async () => {
-            try {
-              await audio.playWav(outPath);
-            } catch (error) {
-              ctx.ui.notify(
-                `Audio playback failed: ${error instanceof Error ? error.message : String(error)}`,
-                "error",
-              );
-            } finally {
-              await unlink(outPath).catch(() => undefined);
-              await rm(directory, { recursive: true, force: true }).catch(() => undefined);
-            }
-          },
-        });
-        ctx.ui.notify(`Speaking last message (${textToSpeak.length} chars)`, "info");
       } finally {
         if (visualizer) {
           visualizer.clearSynthesisWidget(ctx);

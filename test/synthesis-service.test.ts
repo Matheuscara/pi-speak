@@ -91,6 +91,34 @@ test("queued jobs sharing a model load it once", async () => {
   await harness.service.shutdown();
 });
 
+test("a long reply yields playable WAV chunks before later synthesis completes", async () => {
+  const secondGate = deferred<void>();
+  const secondStarted = deferred<void>();
+  const calls: string[] = [];
+  const service = createTestService({
+    async synthesize(text) {
+      calls.push(text);
+      if (calls.length === 2) {
+        secondStarted.resolve();
+        await secondGate.promise;
+      }
+      return new Float32Array([0, 0.1, 0.2]);
+    },
+  });
+  const heard: Buffer[] = [];
+  const text = Array.from({ length: 12 }, (_, index) => `Sentence ${index} explains temporary access to the database.`).join(" ");
+  const speaking = service.synthesizeChunks(settings("model-a"), text, (wav) => heard.push(wav));
+  await secondStarted.promise;
+  assert.equal(heard.length, 1);
+  assert.equal(heard[0]!.toString("ascii", 0, 4), "RIFF");
+  assert.ok(calls.every((chunk) => chunk.length <= 240));
+  secondGate.resolve();
+  await speaking;
+  assert.equal(heard.length, calls.length);
+  assert.equal(calls.join(" "), text);
+  await service.shutdown();
+});
+
 test("a different model is unloaded and loaded at the queue boundary", async () => {
   const harness = createHarness([4]);
   const first = harness.service.synthesize(settings("model-a"), "4");

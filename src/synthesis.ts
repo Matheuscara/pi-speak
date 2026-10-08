@@ -1,4 +1,6 @@
-import { existsSync, rmSync } from "node:fs";
+import { fork, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 
 export type SynthesisOptions = {
   voice: string;
@@ -6,80 +8,105 @@ export type SynthesisOptions = {
   signal?: AbortSignal;
 };
 
-export type SynthesisResult = {
-  audio: Float32Array;
-  sampling_rate: number;
+type WorkerResponse =
+  | { id: number; type: "ready" }
+  | { id: number; type: "audio"; audio: string }
+  | { id: number; type: "error"; message: string };
+
+type PendingRequest = {
+  resolve: (samples: Float32Array | undefined) => void;
+  reject: (error: Error) => void;
 };
 
-/** In-process Kokoro backend, mirrors pi-transcribe TranscribeCppBackend. */
+/** Keep model loading and CPU-bound inference out of the terminal process. */
 export class KokoroBackend {
-  private tts: { generate: (text: string, opts: { voice: string; speed: number }) => Promise<SynthesisResult>; model: { dispose: () => Promise<void> | void } } | undefined;
-  private loading: Promise<unknown> | undefined;
+  private child: ChildProcess | undefined;
+  private readonly pending = new Map<number, PendingRequest>();
+  private nextId = 0;
+  private loading: Promise<void> | undefined;
+  private prepared = false;
   private disposed = false;
 
-  constructor(private readonly modelPath: string) {}
+  private request(message: { type: "prepare" } | { type: "synthesize"; text: string; voice: string; speed: number }): Promise<Float32Array | undefined> {
+    const child = this.child;
+    if (!child) return Promise.reject(new Error("Speech subprocess is unavailable"));
+    return new Promise((resolve, reject) => {
+      const id = ++this.nextId;
+      this.pending.set(id, { resolve, reject });
+      child.send({ id, ...message }, (error) => {
+        if (!error) return;
+        this.pending.delete(id);
+        reject(error);
+      });
+    });
+  }
 
   async prepare(): Promise<void> {
-    if (this.tts) return;
+    if (this.prepared) return;
     if (this.disposed) throw new Error("Synthesis backend has been disposed");
+    if (this.loading) return this.loading;
 
-    if (!this.loading) {
-      this.loading = (async () => {
-        const { KokoroTTS } = await import("kokoro-js");
-        const { env } = await import("@huggingface/transformers");
-        // Allow local models and keep default cache dir (HF hub cache is shared via HF_HUB_CACHE).
-        env.allowLocalModels = true;
-        try {
-          const tts = await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0-ONNX", {
-            dtype: "q4",
-            device: "cpu",
-          });
-          if (this.disposed) {
-            await tts.model.dispose();
-            throw new Error("Synthesis backend was disposed while loading");
-          }
-          this.tts = tts as unknown as typeof this.tts;
-          return tts;
-        } catch (error) {
-          try {
-            if (existsSync(this.modelPath)) rmSync(this.modelPath, { force: true });
-          } catch {}
-          throw error;
-        }
-      })();
-    }
+    const path = fileURLToPath(new URL("./synthesis-worker.ts", import.meta.url));
+    const child = fork(path, [], {
+      execPath: process.versions.bun ? "node" : process.execPath,
+      execArgv: [],
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    this.child = child;
+    child.stderr?.resume();
+    child.on("message", (response: WorkerResponse) => {
+      const pending = this.pending.get(response.id);
+      if (!pending) return;
+      this.pending.delete(response.id);
+      if (response.type === "error") {
+        pending.reject(new Error(response.message));
+      } else if (response.type === "audio") {
+        const bytes = Buffer.from(response.audio, "base64");
+        const samples = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        pending.resolve(samples);
+      } else {
+        pending.resolve(undefined);
+      }
+    });
+    const fail = (error: Error): void => {
+      if (this.child !== child) return;
+      this.child = undefined;
+      this.prepared = false;
+      for (const pending of this.pending.values()) pending.reject(error);
+      this.pending.clear();
+    };
+    child.on("error", fail);
+    child.on("exit", (code, signal) => fail(new Error(`Speech subprocess exited (${signal ?? code})`)));
 
-    try {
-      await this.loading;
-    } finally {
-      this.loading = undefined;
-    }
+    this.loading = this.request({ type: "prepare" })
+      .then(() => { this.prepared = true; })
+      .finally(() => { this.loading = undefined; });
+    return this.loading;
   }
 
   async synthesize(text: string, options: SynthesisOptions): Promise<Float32Array> {
     options.signal?.throwIfAborted();
     await this.prepare();
-    const tts = this.tts;
-    if (!tts) throw new Error("Synthesis backend is not prepared");
     options.signal?.throwIfAborted();
-    const result = await tts.generate(text, {
-      voice: options.voice,
-      speed: options.speed,
-    });
+    const samples = await this.request({ type: "synthesize", text, voice: options.voice, speed: options.speed });
     options.signal?.throwIfAborted();
-    return result.audio as Float32Array;
+    if (!samples) throw new Error("Speech subprocess returned no audio");
+    return samples;
   }
 
   async dispose(): Promise<void> {
+    if (this.disposed) return;
     this.disposed = true;
     await this.loading?.catch(() => undefined);
-    const tts = this.tts;
-    this.tts = undefined;
-    if (tts) {
-      try {
-        await tts.model.dispose();
-      } catch {}
+    const child = this.child;
+    this.child = undefined;
+    this.prepared = false;
+    for (const pending of this.pending.values()) pending.reject(new Error("Synthesis backend has been disposed"));
+    this.pending.clear();
+    if (child) {
+      const exited = once(child, "exit").then(() => undefined);
+      child.kill();
+      await exited;
     }
-    if (typeof global.gc === "function") global.gc();
   }
 }

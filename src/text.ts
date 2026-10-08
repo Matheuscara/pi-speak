@@ -81,3 +81,32 @@ export function cleanTextForSpeech(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+/** Keep each Kokoro request short enough to start playback before a long reply finishes. */
+export function splitTextForSpeech(text: string, maxChars = 240): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    while (start < text.length && /\s/.test(text[start]!)) start++;
+    if (start >= text.length) break;
+
+    let end = Math.min(start + maxChars, text.length);
+    if (end < text.length) {
+      const floor = start + Math.floor(maxChars / 2);
+      let sentenceEnd = -1;
+      let wordEnd = -1;
+      for (let i = end; i > start; i--) {
+        if (!/\s/.test(text[i]!)) continue;
+        if (wordEnd < 0) wordEnd = i;
+        if (i >= floor && /[.!?;:]/.test(text[i - 1]!)) {
+          sentenceEnd = i;
+          break;
+        }
+      }
+      end = sentenceEnd >= 0 ? sentenceEnd : wordEnd > start ? wordEnd : end;
+    }
+    chunks.push(text.slice(start, end).trim());
+    start = end;
+  }
+  return chunks;
+}

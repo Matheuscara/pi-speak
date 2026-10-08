@@ -26,7 +26,7 @@ Alternatively, use `omp -e /absolute/path/to/pi-speak` for one session. Run `/sp
 
 On Linux, install an audio player such as `pw-play` (PipeWire), `paplay` (PulseAudio), or `aplay` (ALSA), and ensure it is executable on `PATH`. This also supports NixOS profile paths such as `/run/current-system/sw/bin` and `~/.nix-profile/bin`. On macOS, `afplay` is used.
 
-On NixOS, if Bun fails to load `sharp` with `ERR_DLOPEN_FAILED: libstdc++.so.6`, launch OMP with the GCC runtime library on `LD_LIBRARY_PATH`. In a Nix wrapper, obtain the directory from `${pkgs.stdenv.cc.cc.lib}/lib` rather than hardcoding a `/nix/store` path. Keep this environment change scoped to the OMP process.
+On NixOS, if Kokoro's native dependencies cannot find `libstdc++.so.6`, launch OMP with the GCC runtime library on `LD_LIBRARY_PATH`. In a Nix wrapper, obtain the directory from `${pkgs.stdenv.cc.cc.lib}/lib` rather than hardcoding a `/nix/store` path. Keep this environment change scoped to the OMP process. Node.js 22 or newer must be on `PATH`: the model runs in a separate Node process to keep the terminal responsive.
 
 ## Usage
 
@@ -35,6 +35,8 @@ The extension registers:
 - `speak` tool that the agent can use to synthesize speech locally via Kokoro;
 - `/speak` for voice, speed, and model settings;
 - `Ctrl+Alt+X` to speak the last agent message.
+
+Long replies are synthesized in short, ordered chunks. Playback starts after the first chunk instead of waiting for the entire reply to finish.
 
 To develop or run it from a checkout:
 

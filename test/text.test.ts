@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanTextForSpeech, DEFAULT_PREPROCESSING_PROMPT, extractTextContent, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
+import { cleanTextForSpeech, DEFAULT_PREPROCESSING_PROMPT, extractTextContent, splitTextForSpeech, SPEED_VALUES, speedToIndex, voiceHint } from "../src/text.js";
 
 test("cleanTextForSpeech", async (t) => {
   await t.test("strips fenced code blocks entirely", () => {
@@ -48,6 +48,16 @@ test("cleanTextForSpeech", async (t) => {
   await t.test("returns empty for only code fences", () => {
     assert.equal(cleanTextForSpeech("```js\ncode\n```"), "");
   });
+});
+
+test("splitTextForSpeech preserves a long reply across bounded chunks", () => {
+  const text = Array.from({ length: 28 }, (_, index) =>
+    `Section ${index}: Developers receive individual read-only credentials with a short time to live.`,
+  ).join(" ");
+  const chunks = splitTextForSpeech(text);
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks.every((chunk) => chunk.length <= 240 && chunk.length > 0));
+  assert.equal(chunks.join(" "), text);
 });
 
 test("extractTextContent", () => {
