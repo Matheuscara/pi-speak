@@ -43,6 +43,18 @@ export default function piSpeak(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerShortcut("ctrl+alt+y" as Parameters<ExtensionAPI["registerShortcut"]>[0], {
+    description: "Speak last agent message with alternate voice",
+    handler: async (ctx) => {
+      try {
+        await (await loadRuntime()).speakLastMessage(ctx, true);
+      } catch (error) {
+        if (ctx.hasUI) ctx.ui.setWidget(STATUS_WIDGET_KEY, undefined);
+        throw error;
+      }
+    },
+  });
+
   pi.registerCommand("speak", {
     description: "Configure voice and speed for pi-speak",
     handler: async (_args, ctx) => (await loadRuntime()).showSettings(ctx),

@@ -13,6 +13,7 @@ function requireTui(ctx: ExtensionContext): boolean {
 type ModelSelectionOptions = {
   currentModelId?: string;
   voice?: string;
+  alternateVoice?: string;
   speed?: number;
   preprocessingEnabled?: boolean;
   preprocessingModel?: { provider: string; id: string };
@@ -122,6 +123,7 @@ export async function runModelSelection(
     await enqueueCommit(async () => {
       const settings = settingsForModel(selected.id, path, {
         voice: configured?.voice ?? options.voice,
+        alternateVoice: configured?.alternateVoice ?? options.alternateVoice,
         speed: configured?.speed ?? options.speed,
         preprocessingEnabled: configured?.preprocessingEnabled ?? options.preprocessingEnabled,
         preprocessingModel: configured?.preprocessingModel ?? options.preprocessingModel,

@@ -553,11 +553,18 @@ export async function showSpeakSettings(
       "Voice",
       `${configured.voice}${voiceHint(configured.voice) ? ` (${voiceHint(configured.voice)})` : ""}`,
     );
+    const alternateVoiceChoice = settingChoice(
+      theme,
+      "Alternate voice",
+      configured.alternateVoice
+        ? `${configured.alternateVoice}${voiceHint(configured.alternateVoice) ? ` (${voiceHint(configured.alternateVoice)})` : ""}`
+        : "not configured",
+    );
     const speedChoice = settingChoice(theme, "Speed", String(configured.speed));
     const modelChoice = settingChoice(theme, "Model", model.name);
     const preprocessingLabel = configured.preprocessingEnabled && configured.preprocessingModel ? `${configured.preprocessingModel.provider}/${configured.preprocessingModel.id}` : "off";
     const preprocessingChoice = settingChoice(theme, "Preprocessing LLM", preprocessingLabel);
-    const choices = [voiceChoice, speedChoice, modelChoice, preprocessingChoice, "Done"];
+    const choices = [voiceChoice, alternateVoiceChoice, speedChoice, modelChoice, preprocessingChoice, "Done"];
     const summary = "pi-speak settings";
     const choice = await ctx.ui.select(summary, choices);
     if (!choice || choice === "Done") return false;
@@ -569,6 +576,18 @@ export async function showSpeakSettings(
       await writeSettings(updated);
       Object.assign(configured, updated);
       ctx.ui.notify(`Voice saved as ${voice}${voiceHint(voice) ? ` (${voiceHint(voice)})` : ""}`, "info");
+      continue;
+    }
+    if (choice === alternateVoiceChoice) {
+      const alternateVoice = await chooseVoice(ctx, configured.alternateVoice ?? "pf_dora");
+      if (!alternateVoice || alternateVoice === configured.alternateVoice) continue;
+      const updated: PiSpeakSettings = { ...configured, alternateVoice };
+      await writeSettings(updated);
+      Object.assign(configured, updated);
+      ctx.ui.notify(
+        `Alternate voice saved as ${alternateVoice}${voiceHint(alternateVoice) ? ` (${voiceHint(alternateVoice)})` : ""}`,
+        "info",
+      );
       continue;
     }
     if (choice === speedChoice) {
@@ -583,6 +602,7 @@ export async function showSpeakSettings(
     if (choice === modelChoice) {
       const changed = await runModelSelection(ctx, {
         currentModelId: configured.model.id,
+        alternateVoice: configured.alternateVoice,
         voice: configured.voice,
         speed: configured.speed,
         preprocessingEnabled: configured.preprocessingEnabled,

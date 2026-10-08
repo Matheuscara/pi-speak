@@ -1,7 +1,7 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getCatalogModel, type CatalogModel } from "./catalog.js";
+import { getCatalogModel, modelSupportsVoice, type CatalogModel } from "./catalog.js";
 
 const SETTINGS_VERSION = 1;
 
@@ -19,6 +19,7 @@ export type PiSpeakSettings = {
   version: 1;
   backend: { type: "kokoro" };
   voice: string;
+  alternateVoice?: string;
   speed: number;
   model: {
     source: "catalog";
@@ -75,6 +76,12 @@ function validateSettings(value: unknown): PiSpeakSettings | undefined {
   if (!model) return undefined;
   if (typeof value.model.path !== "string" || value.model.path.length === 0) return undefined;
 
+  let alternateVoice: string | undefined;
+  if ("alternateVoice" in value && value.alternateVoice !== undefined) {
+    alternateVoice = validateVoice(value.alternateVoice);
+    if (!alternateVoice || !modelSupportsVoice(model, alternateVoice)) return undefined;
+  }
+
   let preprocessingEnabled: boolean | undefined;
   if ("preprocessingEnabled" in value) {
     const raw = (value as Record<string, unknown>).preprocessingEnabled;
@@ -117,6 +124,7 @@ function validateSettings(value: unknown): PiSpeakSettings | undefined {
       id: value.model.id,
       path: value.model.path,
     },
+    ...(alternateVoice ? { alternateVoice } : {}),
     ...(preprocessingEnabled !== undefined ? { preprocessingEnabled } : {}),
     ...(preprocessingModel ? { preprocessingModel } : {}),
     ...(preprocessingPrompt ? { preprocessingPrompt } : {}),
@@ -154,6 +162,7 @@ export async function writeSettings(settings: PiSpeakSettings): Promise<void> {
 
 type ModelSettingsOptions = {
   voice?: string;
+  alternateVoice?: string;
   speed?: number;
   preprocessingEnabled?: boolean;
   preprocessingModel?: PreprocessingModel;
@@ -172,7 +181,7 @@ export function settingsForModel(
   const speed = validateSpeed(options.speed) ?? DEFAULT_SPEED;
 
   // Validate voice belongs to model if possible; fallback to default.
-  const resolvedVoice = modelSupportedVoice(model, voice) ? voice : defaultVoiceForModel(model);
+  const resolvedVoice = modelSupportsVoice(model, voice) ? voice : defaultVoiceForModel(model);
 
   let preprocessingEnabled: boolean | undefined;
   if (typeof options.preprocessingEnabled === "boolean") {
@@ -203,12 +212,9 @@ export function settingsForModel(
     voice: resolvedVoice,
     speed,
     model: { source: "catalog", id: modelId, path: modelPath },
+    ...(options.alternateVoice && modelSupportsVoice(model, options.alternateVoice) ? { alternateVoice: options.alternateVoice } : {}),
     ...(preprocessingEnabled !== undefined ? { preprocessingEnabled } : {}),
     ...(preprocessingModel ? { preprocessingModel } : {}),
     ...(preprocessingPrompt ? { preprocessingPrompt } : {}),
   };
-}
-
-function modelSupportedVoice(model: CatalogModel, voice: string): boolean {
-  return (model.voices as readonly string[]).includes(voice);
 }

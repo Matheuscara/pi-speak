@@ -34,7 +34,10 @@ The extension registers:
 
 - `speak` tool that the agent can use to synthesize speech locally via Kokoro;
 - `/speak` for voice, speed, and model settings;
-- `Ctrl+Alt+X` to speak the last agent message.
+- `Ctrl+Alt+X` to speak the last agent message using the primary voice;
+- `Ctrl+Alt+Y` to speak it using the separately configured alternate voice.
+
+Set the alternate voice in `/speak` (for example, use `bf_emma` for British English and keep an American English voice as primary). The bundled Kokoro runtime currently supports English voices only; Portuguese voices shown in the catalog are not accepted by this runtime.
 
 Long replies are synthesized in short, ordered chunks. Playback starts after the first chunk instead of waiting for the entire reply to finish.
 

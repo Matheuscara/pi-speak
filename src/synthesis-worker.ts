@@ -23,7 +23,6 @@ process.on("message", async (request: Request) => {
       return;
     }
     if (!tts) throw new Error("Speech model is not prepared");
-    if (!(request.voice in tts.voices)) throw new Error(`Unknown speech voice: ${request.voice}`);
     const result = await tts.generate(request.text, { voice: request.voice as KokoroVoice, speed: request.speed });
     const samples = result.audio as Float32Array;
     const bytes = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);

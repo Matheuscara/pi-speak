@@ -15,7 +15,7 @@ export type PiSpeakRuntime = {
   readonly audioQueue: AudioQueue;
   requireConfiguredSettingsForTool(): Promise<PiSpeakSettings>;
   showSettings(ctx: ExtensionCommandContext): Promise<void>;
-  speakLastMessage(ctx: ExtensionContext): Promise<void>;
+  speakLastMessage(ctx: ExtensionContext, alternateVoice?: boolean): Promise<void>;
   replayOnboarding(ctx: ExtensionCommandContext): Promise<void>;
   shutdown(ctx: ExtensionContext): Promise<void>;
 };
@@ -91,6 +91,7 @@ export function createPiSpeakRuntime(
     const configured = await runModelSelection(ctx, {
       currentModelId: previous.model.id,
       voice: previous.voice,
+      alternateVoice: previous.alternateVoice,
       speed: previous.speed,
       preprocessingEnabled: previous.preprocessingEnabled,
       preprocessingModel: previous.preprocessingModel,
@@ -177,7 +178,7 @@ export function createPiSpeakRuntime(
     if (reload) await ctx.reload();
   }
 
-  async function speakLastMessage(ctx: ExtensionContext): Promise<void> {
+  async function speakLastMessage(ctx: ExtensionContext, alternateVoice = false): Promise<void> {
     return runExclusive(ctx, async () => {
       let configured: PiSpeakSettings;
       try {
@@ -186,6 +187,13 @@ export function createPiSpeakRuntime(
         ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
         return;
       }
+
+      const voice = alternateVoice ? configured.alternateVoice : configured.voice;
+      if (!voice) {
+        ctx.ui.notify("No alternate voice configured. Choose Alternate voice in /speak.", "warning");
+        return;
+      }
+      const voiceSettings = voice === configured.voice ? configured : { ...configured, voice };
 
       const branch = ctx.sessionManager.getBranch();
       let raw: string | undefined;
@@ -270,7 +278,7 @@ export function createPiSpeakRuntime(
         const audio = await loadAudio();
         let started = false;
         try {
-          await synthesisService.synthesizeChunks(configured, textToSpeak, (wav) => {
+          await synthesisService.synthesizeChunks(voiceSettings, textToSpeak, (wav) => {
             audio.enqueueWav(audioQueue, wav, (error) => {
               ctx.ui.notify(
                 `Audio playback failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -279,7 +287,7 @@ export function createPiSpeakRuntime(
             });
             if (!started) {
               started = true;
-              ctx.ui.notify(`Speaking last message (${textToSpeak.length} chars)`, "info");
+              ctx.ui.notify(`Speaking last message with ${voice} (${textToSpeak.length} chars)`, "info");
             }
           });
         } catch (error) {

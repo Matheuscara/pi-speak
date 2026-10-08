@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createPiSpeakRuntime } from "../src/runtime.js";
-import { settingsForModel, writeSettings } from "../src/settings.js";
+import { readSettings, settingsForModel, writeSettings } from "../src/settings.js";
 import { CATALOG_MODELS } from "../src/catalog.js";
 import { DEFAULT_PREPROCESSING_PROMPT } from "../src/text.js";
 import { deferred, nextTurn } from "./helpers.js";
@@ -459,6 +459,38 @@ test("runtime preprocessing", async (t) => {
       await runtime.speakLastMessage(ctx);
       assert.equal(fakeSynth.calls.length, 1);
       assert.equal(fakeSynth.calls[0]!.text, "latest with **markdown**");
+      await runtime.shutdown(ctx);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = orig;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("alternate shortcut synthesizes with its configured voice only", async () => {
+    const model = CATALOG_MODELS[0]!;
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-rt-alt-"));
+    const orig = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const settings = settingsForModel(model.id, fakePath, {
+        voice: "af_heart",
+        alternateVoice: "bf_emma",
+        preprocessingEnabled: false,
+      });
+      await writeSettings(settings);
+      const branch = [{ type: "message", message: { role: "assistant", content: [{ type: "text", text: "Hello in two voices." }] } }];
+      const fakeSynth = createFakeSynthesisService();
+      const { ctx } = createMockCtx(branch);
+      const pi = { events: { emit: () => {}, on: () => () => {} }, appendEntry: () => {} } as never;
+      const runtime = createPiSpeakRuntime(pi, { synthesisService: fakeSynth.service });
+
+      await runtime.speakLastMessage(ctx);
+      await runtime.speakLastMessage(ctx, true);
+
+      assert.deepEqual(fakeSynth.calls.map((call) => call.settings.voice), ["af_heart", "bf_emma"]);
+      assert.equal((await readSettings()).settings!.voice, "af_heart");
       await runtime.shutdown(ctx);
     } finally {
       process.env.PI_CODING_AGENT_DIR = orig;

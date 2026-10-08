@@ -93,12 +93,18 @@ test("config", async (t) => {
     const fakePath = "/tmp/fake.onnx";
 
     const s1 = settingsForModel(model.id, fakePath, { voice: model.voices[0], speed: 2.0 });
-    assert.equal(s1.voice, model.voices[0]);
+    assert.equal(s1.voice, "af_heart");
     assert.equal(s1.speed, 2.0);
 
     const s2 = settingsForModel(model.id, fakePath, { voice: "nonexistent_voice", speed: 1 });
     assert.equal(s2.voice, "af_heart");
 
+
+    const alternate = settingsForModel(model.id, fakePath, {
+      voice: "af_heart",
+      alternateVoice: "pf_dora",
+    });
+    assert.equal(alternate.alternateVoice, undefined, "do not persist voices the runtime cannot synthesize");
     const s3 = settingsForModel(model.id, fakePath, { voice: model.voices[0], speed: 99 as any });
     assert.equal(s3.speed, 1.0);
 
@@ -136,6 +142,7 @@ test("config", async (t) => {
       await writeFile(fakePath, "x");
       const created = settingsForModel(model.id, fakePath, {
         voice: model.voices[0],
+        alternateVoice: "bf_emma",
         speed: 1.5,
         preprocessingEnabled: true,
         preprocessingModel: { provider: " openai ", id: " gpt-4o " },
@@ -149,6 +156,7 @@ test("config", async (t) => {
       assert.ok(read.settings);
       assert.equal(read.settings!.preprocessingEnabled, true);
       assert.deepEqual(read.settings!.preprocessingModel, { provider: "openai", id: "gpt-4o" });
+      assert.equal(read.settings!.alternateVoice, "bf_emma");
       assert.equal(read.settings!.preprocessingPrompt, "Custom prompt");
       // preserve via spread (voice change path)
       const updated = { ...read.settings!, voice: model.voices[1] ?? model.voices[0]! };

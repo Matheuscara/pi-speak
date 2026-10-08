@@ -28,6 +28,20 @@ export type CatalogModel = {
 
 export const CATALOG_MODELS: readonly CatalogModel[] = CATALOG_MODELS_GENERATED;
 
+/** Voice IDs supported by the installed Kokoro JS runtime. */
+export const RUNTIME_VOICES = [
+  "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore", "af_nicole",
+  "af_nova", "af_river", "af_sarah", "af_sky", "am_adam", "am_echo", "am_eric", "am_fenrir",
+  "am_liam", "am_michael", "am_onyx", "am_puck", "am_santa", "bf_emma", "bf_isabella",
+  "bm_george", "bm_lewis", "bf_alice", "bf_lily", "bm_daniel", "bm_fable",
+] as const;
+
+const runtimeVoiceSet = new Set<string>(RUNTIME_VOICES);
+
+export function isRuntimeVoice(voice: string): boolean {
+  return runtimeVoiceSet.has(voice);
+}
+
 const languageNames = new Intl.DisplayNames(["en"], { type: "language" });
 
 export function canonicalLanguage(language: string): string {
@@ -55,11 +69,7 @@ export function getCatalogLanguages(): string[] {
 }
 
 export function getCatalogVoices(): string[] {
-  const voices = new Set<string>();
-  for (const model of CATALOG_MODELS) {
-    for (const voice of model.voices) voices.add(voice);
-  }
-  return [...voices].sort();
+  return [...RUNTIME_VOICES];
 }
 
 export function modelSupportsLanguage(model: CatalogModel, language: string): boolean {
@@ -72,7 +82,7 @@ export function modelMatchesLanguage(model: CatalogModel, language: string): boo
 }
 
 export function modelSupportsVoice(model: CatalogModel, voice: string): boolean {
-  return (model.voices as readonly string[]).includes(voice);
+  return isRuntimeVoice(voice) && (model.voices as readonly string[]).includes(voice);
 }
 
 export function preferredLanguageMatchCount(

@@ -129,12 +129,41 @@ test("settings-menu preprocessing picker", async (t) => {
       const pi = {} as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI;
       const result = await showSpeakSettings(pi, ctx as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext, settings);
       assert.equal(result, false);
-      // Choices should have 5 entries: Voice, Speed, Model, Preprocessing LLM, Done
-      assert.equal(capturedChoices.length, 5, `expected 5 choices, got ${JSON.stringify(capturedChoices)}`);
+      const alternateRow = capturedChoices.find((c) => c.includes("Alternate voice"));
+      assert.ok(alternateRow?.includes("not configured"), `alternate voice should be configurable: ${alternateRow}`);
       const hasPreprocessing = capturedChoices.some((c) => c.includes("Preprocessing LLM"));
-      assert.ok(hasPreprocessing, `choices should contain Preprocessing LLM row: ${JSON.stringify(capturedChoices)}`);
       const preprocessingRow = capturedChoices.find((c) => c.includes("Preprocessing LLM"))!;
       assert.ok(preprocessingRow.includes("off"), `disabled row should show off: ${preprocessingRow}`);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = orig;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test("alternate voice choice persists independently from the primary voice", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-sm-alt-"));
+    const orig = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const catalogModel = CATALOG_MODELS[0]!;
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const settings = settingsForModel(catalogModel.id, fakePath, { voice: "af_heart" });
+      await writeSettings(settings);
+      const { ctx } = createMockCtx({ mode: "rpc" });
+      let menuCall = 0;
+      const originalSelect = ctx.ui.select;
+      (ctx.ui as unknown as { select: typeof originalSelect }).select = async (_title, options) => {
+        menuCall++;
+        if (menuCall === 1) return options.find((option) => option.includes("Alternate voice"))!;
+        if (menuCall === 2) return options.find((option) => option.startsWith("bf_emma"))!;
+        return "Done";
+      };
+      const pi = {} as unknown as import("@earendil-works/pi-coding-agent").ExtensionAPI;
+      await showSpeakSettings(pi, ctx, settings);
+      const updated = (await readSettings()).settings!;
+      assert.equal(updated.voice, "af_heart");
+      assert.equal(updated.alternateVoice, "bf_emma");
     } finally {
       process.env.PI_CODING_AGENT_DIR = orig;
       await rm(dir, { recursive: true, force: true });
