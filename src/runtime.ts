@@ -289,6 +289,11 @@ export function createPiSpeakRuntime(
           play: async () => {
             try {
               await audio.playWav(outPath);
+            } catch (error) {
+              ctx.ui.notify(
+                `Audio playback failed: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+              );
             } finally {
               await unlink(outPath).catch(() => undefined);
               await rm(directory, { recursive: true, force: true }).catch(() => undefined);

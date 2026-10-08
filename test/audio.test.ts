@@ -1,41 +1,104 @@
 import assert from "node:assert/strict";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createAudioQueue, getAudioPlayer } from "../src/audio.js";
 
 test("getAudioPlayer", async (t) => {
-  await t.test("darwin prefers /usr/bin/afplay when exists", () => {
-    const player = getAudioPlayer("darwin", (p) => p === "/usr/bin/afplay");
+  const executables = (...paths: string[]) => (p: string) => paths.includes(p);
+
+  await t.test("selects a Nix profile player found only on PATH", () => {
+    const player = getAudioPlayer({
+      platform: "linux",
+      pathEnv: "/run/wrappers/bin:/home/user/.nix-profile/bin:/run/current-system/sw/bin",
+      isExecutable: executables("/run/current-system/sw/bin/pw-play"),
+    });
+    assert.equal(player, "/run/current-system/sw/bin/pw-play");
+  });
+
+  await t.test("player preference wins over PATH order", () => {
+    const player = getAudioPlayer({
+      platform: "linux",
+      pathEnv: "/opt/a/bin:/opt/b/bin",
+      isExecutable: executables("/opt/a/bin/aplay", "/opt/a/bin/paplay", "/opt/b/bin/pw-play"),
+    });
+    assert.equal(player, "/opt/b/bin/pw-play");
+  });
+
+  await t.test("earlier PATH entry wins for the same player", () => {
+    const player = getAudioPlayer({
+      platform: "linux",
+      pathEnv: "/home/user/.nix-profile/bin:/usr/bin",
+      isExecutable: executables("/usr/bin/paplay", "/home/user/.nix-profile/bin/paplay"),
+    });
+    assert.equal(player, "/home/user/.nix-profile/bin/paplay");
+  });
+
+  await t.test("skips relative and empty PATH entries", () => {
+    const player = getAudioPlayer({
+      platform: "linux",
+      pathEnv: ":bin:./node_modules/.bin",
+      isExecutable: (p) => !p.startsWith("/"),
+    });
+    assert.equal(player, undefined);
+  });
+
+  await t.test("falls back to system dirs when PATH lacks them", () => {
+    const player = getAudioPlayer({
+      platform: "linux",
+      pathEnv: "",
+      isExecutable: executables("/usr/local/bin/aplay"),
+    });
+    assert.equal(player, "/usr/local/bin/aplay");
+  });
+
+  await t.test("returns undefined when no player is available", () => {
+    assert.equal(getAudioPlayer({ platform: "linux", pathEnv: "/usr/bin", isExecutable: () => false }), undefined);
+  });
+
+  await t.test("darwin uses afplay", () => {
+    const player = getAudioPlayer({
+      platform: "darwin",
+      pathEnv: "/opt/homebrew/bin:/usr/bin",
+      isExecutable: executables("/opt/homebrew/bin/pw-play", "/usr/bin/afplay"),
+    });
     assert.equal(player, "/usr/bin/afplay");
   });
 
-  await t.test("darwin falls back to afplay", () => {
-    const player = getAudioPlayer("darwin", () => false);
-    assert.equal(player, "afplay");
-  });
+  await t.test(
+    "default check skips missing, non-executable and directory entries",
+    { skip: process.platform === "win32" },
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "pi-speak-audio-"));
+      try {
+        const plain = join(root, "plain");
+        const dir = join(root, "dir");
+        const store = join(root, "store", "pipewire", "bin");
+        const profile = join(root, "profile", "bin");
+        await Promise.all([
+          mkdir(plain),
+          mkdir(join(dir, "pw-play"), { recursive: true }),
+          mkdir(store, { recursive: true }),
+          mkdir(profile, { recursive: true }),
+        ]);
+        await writeFile(join(plain, "pw-play"), "#!/bin/sh\n");
+        await chmod(join(plain, "pw-play"), 0o644);
+        await writeFile(join(store, "pw-play"), "#!/bin/sh\n");
+        await chmod(join(store, "pw-play"), 0o755);
+        // Nix profiles expose binaries as symlinks into the store.
+        await symlink(join(store, "pw-play"), join(profile, "pw-play"));
 
-  await t.test("linux prefers pw-play", () => {
-    const player = getAudioPlayer("linux", (p) => p === "/usr/bin/pw-play");
-    assert.equal(player, "/usr/bin/pw-play");
-  });
-
-  await t.test("linux falls through to paplay", () => {
-    const exists = (p: string) => p === "/usr/bin/paplay";
-    assert.equal(getAudioPlayer("linux", exists), "/usr/bin/paplay");
-  });
-
-  await t.test("linux falls through to aplay", () => {
-    const exists = (p: string) => p === "/usr/bin/aplay";
-    assert.equal(getAudioPlayer("linux", exists), "/usr/bin/aplay");
-  });
-
-  await t.test("linux returns aplay when nothing exists", () => {
-    assert.equal(getAudioPlayer("linux", () => false), "aplay");
-  });
-
-  await t.test("linux prefers /usr/local/bin when /usr/bin missing", () => {
-    const exists = (p: string) => p === "/usr/local/bin/pw-play";
-    assert.equal(getAudioPlayer("linux", exists), "/usr/local/bin/pw-play");
-  });
+        const player = getAudioPlayer({
+          platform: "linux",
+          pathEnv: [join(root, "missing"), plain, dir, profile].join(":"),
+        });
+        assert.equal(player, join(profile, "pw-play"));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 test("createAudioQueue serial drain", async () => {

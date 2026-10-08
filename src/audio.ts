@@ -1,35 +1,69 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
 
 export const AUDIO_PLAYBACK_TIMEOUT_MS = 5 * 60 * 1000;
 
-export function getAudioPlayer(
-  platform: NodeJS.Platform = process.platform,
-  exists: (path: string) => boolean = existsSync,
-): string {
-  if (platform === "darwin") {
-    return exists("/usr/bin/afplay") ? "/usr/bin/afplay" : "afplay";
-  }
-  const candidates = [
-    "/usr/bin/pw-play",
-    "/usr/local/bin/pw-play",
-    "/usr/bin/paplay",
-    "/usr/local/bin/paplay",
-    "/usr/bin/aplay",
-    "/usr/local/bin/aplay",
-  ];
-  for (const cmd of candidates) {
-    if (exists(cmd)) return cmd;
-  }
-  return "aplay";
+/** WAV players in order of preference. */
+const DARWIN_PLAYERS = ["afplay"];
+const LINUX_PLAYERS = ["pw-play", "paplay", "aplay"];
+/** Searched after PATH so minimal environments (e.g. GUI launchers) still find system players. */
+const FALLBACK_DIRS = ["/usr/bin", "/usr/local/bin"];
+
+export interface AudioPlayerLookup {
+  platform?: NodeJS.Platform;
+  /** PATH-style directory list; defaults to `process.env.PATH`. */
+  pathEnv?: string;
+  isExecutable?: (path: string) => boolean;
 }
 
-export function playWav(outPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(getAudioPlayer(), [outPath], { timeout: AUDIO_PLAYBACK_TIMEOUT_MS }, (err) =>
-      err ? reject(err) : resolve(),
-    );
-  });
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Absolute path of the preferred available WAV player, or `undefined` when none
+ * is installed. Player preference wins over directory order; PATH directories
+ * are searched before the conventional system locations.
+ */
+export function getAudioPlayer({
+  platform = process.platform,
+  pathEnv = process.env.PATH ?? "",
+  isExecutable = isExecutableFile,
+}: AudioPlayerLookup = {}): string | undefined {
+  const dirs = new Set<string>();
+  // Relative entries (including empty ones, meaning the cwd) are skipped so a
+  // project directory can never shadow the system audio player.
+  for (const dir of pathEnv.split(platform === "win32" ? ";" : ":")) {
+    if (isAbsolute(dir)) dirs.add(dir);
+  }
+  for (const dir of FALLBACK_DIRS) dirs.add(dir);
+
+  for (const name of platform === "darwin" ? DARWIN_PLAYERS : LINUX_PLAYERS) {
+    for (const dir of dirs) {
+      const candidate = join(dir, name);
+      if (isExecutable(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+export async function playWav(outPath: string): Promise<void> {
+  const player = getAudioPlayer();
+  if (!player) {
+    const install =
+      process.platform === "darwin"
+        ? "afplay ships with macOS; make sure /usr/bin is on PATH"
+        : "install pw-play (PipeWire), paplay (PulseAudio), or aplay (alsa-utils) and make sure it is on PATH";
+    throw new Error(`No WAV audio player found: ${install}.`);
+  }
+  await promisify(execFile)(player, [outPath], { timeout: AUDIO_PLAYBACK_TIMEOUT_MS });
 }
 
 export interface QueueItem {

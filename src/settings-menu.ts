@@ -284,7 +284,8 @@ async function choosePreprocessingModel(
   }
 
   const allModels = ctx.modelRegistry.getAvailable() as unknown as Array<{ provider: string; id: string; name?: string }>;
-  const scopedModels = ctx.scopedModels as unknown as Array<{ model: { provider: string; id: string; name?: string } }>;
+  // Oh My Pi does not expose `scopedModels`; absence means no scope, i.e. every model is usable.
+  const scopedModels = (ctx.scopedModels ?? []) as unknown as Array<{ model: { provider: string; id: string; name?: string } }>;
   const hasScoped = scopedModels.length > 0;
   let scope: "all" | "scoped" = hasScoped ? "scoped" : "all";
 

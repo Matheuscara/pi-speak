@@ -319,6 +319,44 @@ test("settings-menu preprocessing picker", async (t) => {
     }
   });
 
+  await t.test("non-TUI fallback lists every available model when the host omits scopedModels", async () => {
+    // Oh My Pi's ExtensionContext has no `scopedModels` property.
+    const dir = await mkdtemp(join(tmpdir(), "pi-speak-sm-"));
+    const orig = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = dir;
+    try {
+      const catalogModel = CATALOG_MODELS[0]!;
+      const fakePath = join(dir, "model.onnx");
+      await writeFile(fakePath, "x");
+      const settings = settingsForModel(catalogModel.id, fakePath, { preprocessingEnabled: false });
+      await writeSettings(settings);
+      const { ctx } = createMockCtx({
+        mode: "rpc",
+        availableModels: [
+          { provider: "openai", id: "gpt-4o" },
+          { provider: "anthropic", id: "claude" },
+        ],
+      });
+      Reflect.deleteProperty(ctx, "scopedModels");
+      let pickerOptions: string[] = [];
+      let call = 0;
+      (ctx.ui as unknown as { select: typeof ctx.ui.select }).select = async (_t: string, options: string[]) => {
+        call++;
+        if (call === 1) return options.find((o) => o.includes("Preprocessing LLM"))!;
+        if (call === 2) {
+          pickerOptions = options;
+          return "Disabled";
+        }
+        return "Done";
+      };
+      await showSpeakSettings({} as never, ctx, settings);
+      assert.deepEqual(pickerOptions, ["Disabled", "anthropic/claude", "openai/gpt-4o"]);
+    } finally {
+      process.env.PI_CODING_AGENT_DIR = orig;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   await t.test("cancelling picker leaves settings unchanged", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pi-speak-sm-"));
     const orig = process.env.PI_CODING_AGENT_DIR;
