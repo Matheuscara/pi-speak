@@ -10,7 +10,7 @@ pi install ssh://git@github.com/s1m0n38/pi-speak
 
 ### Oh My Pi
 
-Tested with OMP 18.8.4. OMP 18.2.11 cannot resolve a transitive `sharp` dependency from this extension; upgrade OMP if `speak` fails with `Cannot find package 'detect-libc'` or `Could not load the "sharp" module`.
+Tested with OMP 18.2.11 and 18.8.4. CPU-bound Kokoro inference runs in a Node subprocess, so it does not block OMP's terminal interface.
 
 Clone and link the extension so OMP loads it in future sessions:
 
